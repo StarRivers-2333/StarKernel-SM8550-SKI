@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/cpu.h>
@@ -146,7 +145,7 @@ static void cluster_predict(struct lpm_cluster *cluster_gov)
 	 */
 	for (j = 1; j < genpd->state_count; j++) {
 		uint32_t count = 0;
-		u64 residency = genpd->states[j].residency_ns;
+		u32 residency = genpd->states[j].residency_ns;
 
 		avg_residency = 0;
 		for (i = 0; i < MAXSAMPLES; i++) {
@@ -252,7 +251,7 @@ static void cluster_power_down(struct lpm_cluster *cluster_gov)
 {
 	struct generic_pm_domain *genpd = cluster_gov->genpd;
 	int idx = genpd->state_idx;
-	uint64_t residency;
+	uint32_t residency;
 
 	if (idx < 0)
 		return;
@@ -280,7 +279,7 @@ static void cluster_power_down(struct lpm_cluster *cluster_gov)
  * @action:  action i.e power_off/power_on
  * @data:  pointer to private data structure
  *
- * It returns the NOTIFY_OK/NOTIFY_BAD to notify the notifier call chain
+ * It returns the NOTIFY_OK to notify the notifier call chain
  */
 static int cluster_power_cb(struct notifier_block *nb,
 			    unsigned long action, void *data)
@@ -304,9 +303,6 @@ static int cluster_power_cb(struct notifier_block *nb,
 		cluster_predict(cluster_gov);
 		break;
 	case GENPD_NOTIFY_PRE_OFF:
-		if (!cluster_gov->state_allowed[pd->state_idx])
-			return NOTIFY_BAD;
-
 		if (cluster_gov->genpd->suspended_count != 0) {
 			clear_cpu_predict_history();
 			clear_cluster_history(cluster_gov);
@@ -390,14 +386,14 @@ void update_cluster_select(struct lpm_cpu *cpu_gov)
 		if (!cluster_gov->initialized)
 			continue;
 
+		spin_lock(&cluster_gov->lock);
+		cluster_gov->now = cpu_gov->now;
 		genpd = cluster_gov->genpd;
 		if (cpumask_test_cpu(cpu, genpd->cpus)) {
-			spin_lock(&cluster_gov->lock);
-			cluster_gov->now = cpu_gov->now;
 			cluster_gov->cpu_next_wakeup[cpu] = cpu_gov->next_wakeup;
 			update_cluster_next_wakeup(cluster_gov);
-			spin_unlock(&cluster_gov->lock);
 		}
+		spin_unlock(&cluster_gov->lock);
 	}
 }
 
@@ -408,26 +404,38 @@ static void android_vh_allow_domain_state(void *unused,
 {
 	struct lpm_cluster *cluster_gov = to_cluster(genpd);
 
-	if (!cluster_gov)
-		return;
-
 	*allow = cluster_gov->state_allowed[idx];
 }
 #endif
+
+static void cluster_gov_disable(void)
+{
+#if defined(_TRACE_HOOK_PM_DOMAIN_H)
+	unregister_trace_android_vh_allow_domain_state(android_vh_allow_domain_state, NULL);
+#endif
+}
+
+static void cluster_gov_enable(void)
+{
+#if defined(_TRACE_HOOK_PM_DOMAIN_H)
+	register_trace_android_vh_allow_domain_state(android_vh_allow_domain_state, NULL);
+#endif
+}
+
+struct cluster_governor gov_ops = {
+	.select = update_cluster_select,
+	.enable = cluster_gov_enable,
+	.disable = cluster_gov_disable,
+};
 
 static int lpm_cluster_gov_remove(struct platform_device *pdev)
 {
 	struct generic_pm_domain *genpd = pd_to_genpd(pdev->dev.pm_domain);
 	struct lpm_cluster *cluster_gov = to_cluster(genpd);
 
-	if (!cluster_gov)
-		return -ENODEV;
-
 	pm_runtime_disable(&pdev->dev);
-	cluster_gov->genpd->flags &= ~GENPD_FLAG_MIN_RESIDENCY;
 	remove_cluster_sysfs_nodes(cluster_gov);
 	dev_pm_genpd_remove_notifier(cluster_gov->dev);
-	list_del(&cluster_gov->list);
 
 	return 0;
 }
@@ -451,7 +459,6 @@ static int lpm_cluster_gov_probe(struct platform_device *pdev)
 	hrtimer_init(&cluster_gov->histtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	cluster_gov->genpd = pd_to_genpd(cluster_gov->dev->pm_domain);
 	cluster_gov->genpd_nb.notifier_call = cluster_power_cb;
-	cluster_gov->genpd->flags |= GENPD_FLAG_MIN_RESIDENCY;
 	ret = dev_pm_genpd_add_notifier(cluster_gov->dev,
 					&cluster_gov->genpd_nb);
 	if (ret) {
@@ -469,6 +476,8 @@ static int lpm_cluster_gov_probe(struct platform_device *pdev)
 
 	for (i = 0; i < cluster_gov->genpd->state_count; i++)
 		cluster_gov->state_allowed[i] = true;
+
+	register_cluster_governor_ops(&gov_ops);
 
 	return 0;
 }
@@ -488,36 +497,12 @@ static struct platform_driver qcom_cluster_lpm_driver = {
 	},
 };
 
-static void cluster_gov_disable(void)
-{
-#if defined(_TRACE_HOOK_PM_DOMAIN_H)
-	unregister_trace_android_vh_allow_domain_state(android_vh_allow_domain_state, NULL);
-#endif
-	platform_driver_unregister(&qcom_cluster_lpm_driver);
-}
-
-static void cluster_gov_enable(void)
-{
-#if defined(_TRACE_HOOK_PM_DOMAIN_H)
-	register_trace_android_vh_allow_domain_state(android_vh_allow_domain_state, NULL);
-#endif
-	platform_driver_register(&qcom_cluster_lpm_driver);
-}
-
-struct cluster_governor gov_ops = {
-	.select = update_cluster_select,
-	.enable = cluster_gov_enable,
-	.disable = cluster_gov_disable,
-};
-
 void qcom_cluster_lpm_governor_deinit(void)
 {
-	unregister_cluster_governor_ops(&gov_ops);
+	 platform_driver_unregister(&qcom_cluster_lpm_driver);
 }
 
 int qcom_cluster_lpm_governor_init(void)
 {
-	register_cluster_governor_ops(&gov_ops);
-
-	return 0;
+	return platform_driver_register(&qcom_cluster_lpm_driver);
 }

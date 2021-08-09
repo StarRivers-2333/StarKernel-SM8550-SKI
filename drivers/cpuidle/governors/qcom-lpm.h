@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef __QCOM_LPM_H__
@@ -50,7 +49,6 @@ struct lpm_cpu {
 	ktime_t next_wakeup;
 	uint64_t predicted;
 	uint32_t history_invalid;
-	bool predict_started;
 	bool htmr_wkup;
 	struct hrtimer histtimer;
 	struct hrtimer biastimer;
@@ -59,9 +57,7 @@ struct lpm_cpu {
 	ktime_t now;
 	uint64_t bias;
 	int64_t next_pred_time;
-	uint32_t pred_type;
 	bool ipi_pending;
-	spinlock_t lock;
 };
 
 struct cluster_history {
@@ -112,7 +108,6 @@ void clear_cpu_predict_history(void);
 int create_global_sysfs_nodes(void);
 int create_cluster_sysfs_nodes(struct lpm_cluster *cluster_gov);
 void register_cluster_governor_ops(struct cluster_governor *ops);
-void unregister_cluster_governor_ops(struct cluster_governor *ops);
 void remove_global_sysfs_nodes(void);
 void remove_cluster_sysfs_nodes(struct lpm_cluster *cluster_gov);
 

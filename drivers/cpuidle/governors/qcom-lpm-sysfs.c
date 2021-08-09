@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/cpu.h>
@@ -10,7 +9,6 @@
 #include <linux/moduleparam.h>
 #include <linux/pm_domain.h>
 #include <linux/slab.h>
-#include <linux/string.h>
 
 #include "qcom-lpm.h"
 
@@ -21,13 +19,11 @@ static ssize_t cluster_idle_set(struct kobject *kobj,
 				const char *buf, size_t len)
 {
 	struct qcom_cluster_node *d = container_of(attr, struct qcom_cluster_node, disable_attr);
+	struct kernel_param kp;
 	bool disable;
-	int ret;
 
-	ret = strtobool(buf, &disable);
-	if (ret)
-		return -EINVAL;
-
+	kp.arg = &disable;
+	param_set_bool(buf, &kp);
 	d->cluster->state_allowed[d->state_idx] = !disable;
 
 	return len;
@@ -107,10 +103,8 @@ int create_cluster_sysfs_nodes(struct lpm_cluster *cluster)
 		struct qcom_cluster_node *d;
 
 		d = devm_kzalloc(cluster->dev, sizeof(*d), GFP_KERNEL);
-		if (!d) {
-			kobject_put(cluster->dev_kobj);
+		if (!d)
 			return -ENOMEM;
-		}
 
 		d->state_idx = i;
 		d->cluster = cluster;
