@@ -4803,7 +4803,7 @@ static bool sort_page(struct lruvec *lruvec, struct page *page, struct scan_cont
 	return false;
 }
 
-static bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_control *sc)
+bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_control *sc)
 {
 	bool success;
 
@@ -4840,6 +4840,7 @@ static bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_c
 
 	return true;
 }
+EXPORT_SYMBOL_GPL(isolate_page);
 
 static int scan_pages(struct lruvec *lruvec, struct scan_control *sc,
 		      int type, int tier, struct list_head *list)
